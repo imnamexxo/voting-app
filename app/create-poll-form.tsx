@@ -6,7 +6,7 @@ import { createPollAction, type CreatePollState } from "./actions";
 type Limits = { minOptions: number; maxOptions: number };
 
 const inputClass =
-  "w-full rounded-md border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900";
+  "w-full min-w-0 rounded-md border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900";
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
@@ -63,7 +63,7 @@ export function CreatePollForm({ limits }: { limits: Limits }) {
         <FieldError message={errors.question} />
       </label>
 
-      <fieldset className="flex flex-col gap-2">
+      <fieldset className="flex min-w-0 flex-col gap-2">
         <legend className="mb-2 font-medium">선택지</legend>
         {rows.map((row, i) => (
           <div key={row.id} className="flex flex-col gap-1">

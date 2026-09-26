@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getPoll, getResults } from "@/lib/polls";
 import { readVisitorId } from "@/lib/visitor";
+import { CopyLinkButton } from "./copy-link-button";
 import { ResultsView } from "./results-view";
 import { VoteForm } from "./vote-form";
 
@@ -16,7 +17,10 @@ export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-12">
-      <h1 className="text-2xl font-semibold">{poll.question}</h1>
+      <h1 className="text-2xl font-semibold break-words">{poll.question}</h1>
+      <div className="mt-4">
+        <CopyLinkButton pollId={poll.id} />
+      </div>
       {!hasVoted && <VoteForm pollId={poll.id} options={poll.options} />}
       {access.status === "visible" && (
         <>

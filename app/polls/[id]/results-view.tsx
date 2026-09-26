@@ -9,7 +9,7 @@ export function ResultsView({ results }: { results: Results }) {
           return (
             <li key={option.id} className="flex flex-col gap-1">
               <div className="flex items-baseline justify-between gap-2">
-                <span className={chosen ? "font-semibold" : undefined}>
+                <span className={`min-w-0 break-words ${chosen ? "font-semibold" : ""}`}>
                   {option.label}
                   {chosen && <span className="ml-2 text-sm text-zinc-500">내 선택</span>}
                 </span>
