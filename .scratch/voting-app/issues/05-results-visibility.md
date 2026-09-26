@@ -11,3 +11,7 @@
 - [ ] Creator에게는 Vote 전에도 Results가 보이고, 같은 페이지에서 Vote도 할 수 있다
 - [ ] Creator가 Vote하면 다른 Voter처럼 자기 선택이 강조된다
 - [ ] Vote 안 한 Voter / Vote한 Voter / Creator 세 경우를 다루는 Poll 모듈 테스트가 있다
+
+## Comments
+
+- 03 기준 현황: Poll 페이지가 `getResults(...).chosenOptionId`가 있는지로 Results와 Vote 폼 중 하나를 고른다. 이 판단을 모듈로 옮기고(`getResults`가 "볼 수 없음"을 돌려주도록), 페이지 조건을 다시 써야 한다. Vote하지 않은 Creator는 `chosenOptionId`가 없으므로 지금 방식으로는 Results를 볼 수 없다.

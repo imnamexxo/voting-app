@@ -1,7 +1,7 @@
 "use server";
 
-import { redirect } from "next/navigation";
-import { createPoll, PollValidationError, type PollFieldErrors } from "@/lib/polls";
+import { notFound, redirect } from "next/navigation";
+import { castVote, createPoll, PollValidationError, type PollFieldErrors } from "@/lib/polls";
 import { getOrIssueVisitorId } from "@/lib/visitor";
 
 export type CreatePollState = {
@@ -28,5 +28,23 @@ export async function createPollAction(
   }
 
   // redirect() works by throwing, so it stays outside the try.
+  redirect(`/polls/${pollId}`);
+}
+
+export type CastVoteState = { error?: string };
+
+export async function castVoteAction(
+  _prev: CastVoteState,
+  formData: FormData,
+): Promise<CastVoteState> {
+  const pollId = String(formData.get("pollId") ?? "");
+  const optionId = String(formData.get("optionId") ?? "");
+  if (optionId === "") return { error: "선택지를 하나 골라 주세요." };
+
+  const result = await castVote({ pollId, optionId, voterId: await getOrIssueVisitorId() });
+  if (result.status === "poll-not-found") notFound();
+  if (result.status === "option-not-in-poll") return { error: "이 투표에 없는 선택지예요. 다시 골라 주세요." };
+
+  // Reload the Poll page, which now shows the Results.
   redirect(`/polls/${pollId}`);
 }

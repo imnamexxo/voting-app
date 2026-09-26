@@ -4,6 +4,10 @@ import { cookies } from "next/headers";
 // One anonymous ID per browser, used as both the Voter and the Creator identity (ADR-0001).
 const COOKIE = "visitor_id";
 
+export async function readVisitorId(): Promise<string | undefined> {
+  return (await cookies()).get(COOKIE)?.value;
+}
+
 // Cookies can only be set from a Server Function or Route Handler.
 export async function getOrIssueVisitorId(): Promise<string> {
   const store = await cookies();

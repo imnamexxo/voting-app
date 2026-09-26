@@ -90,3 +90,69 @@ export async function getPoll(pollId: string): Promise<Poll | null> {
     options: rows.map((r) => ({ id: String(r.option_id), label: r.label })),
   };
 }
+
+export type CastVoteResult =
+  | { status: "voted" }
+  | { status: "poll-not-found" }
+  | { status: "option-not-in-poll" };
+
+export async function castVote(input: {
+  pollId: string;
+  optionId: string;
+  voterId: string;
+}): Promise<CastVoteResult> {
+  // Only inserts when the Option belongs to the Poll. Comparing as text means a malformed
+  // optionId from a tampered form simply matches nothing.
+  const inserted = await sql`
+    INSERT INTO votes (poll_id, option_id, voter_id)
+    SELECT o.poll_id, o.id, ${input.voterId}
+    FROM options o
+    WHERE o.id::text = ${input.optionId} AND o.poll_id = ${input.pollId}
+    RETURNING id
+  `;
+  if (inserted.length === 0) {
+    const [poll] = await sql`SELECT 1 FROM polls WHERE id = ${input.pollId}`;
+    return { status: poll ? "option-not-in-poll" : "poll-not-found" };
+  }
+  return { status: "voted" };
+}
+
+export type OptionResult = Option & { votes: number; percent: number };
+export type Results = {
+  totalVotes: number;
+  options: OptionResult[];
+  // The Option the viewer voted for, if they have voted.
+  chosenOptionId?: string;
+};
+
+export async function getResults(input: {
+  pollId: string;
+  viewerId?: string;
+}): Promise<Results | null> {
+  const rows = await sql`
+    SELECT
+      o.id,
+      o.label,
+      count(v.id)::int AS votes,
+      coalesce(bool_or(v.voter_id = ${input.viewerId ?? null}), false) AS chosen
+    FROM options o
+    LEFT JOIN votes v ON v.option_id = o.id
+    WHERE o.poll_id = ${input.pollId}
+    GROUP BY o.id
+    ORDER BY o.position
+  `;
+  if (rows.length === 0) return null;
+
+  const totalVotes = rows.reduce((sum, r) => sum + r.votes, 0);
+  const chosen = rows.find((r) => r.chosen);
+  return {
+    totalVotes,
+    chosenOptionId: chosen ? String(chosen.id) : undefined,
+    options: rows.map((r) => ({
+      id: String(r.id),
+      label: r.label,
+      votes: r.votes,
+      percent: totalVotes === 0 ? 0 : Math.round((r.votes / totalVotes) * 100),
+    })),
+  };
+}

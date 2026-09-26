@@ -1,8 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { createPoll, getPoll, PollValidationError } from "./polls";
+import { castVote, createPoll, getPoll, getResults, PollValidationError } from "./polls";
 
 const creatorId = () => `test-creator-${randomUUID()}`;
+const voterId = () => `test-voter-${randomUUID()}`;
+
+// Creates a Poll and returns it with its Option ids.
+async function pollWith(options: string[]) {
+  const pollId = await createPoll({ question: "어디로 갈까요?", options, creatorId: creatorId() });
+  const poll = await getPoll(pollId);
+  if (!poll) throw new Error("created Poll not found");
+  return poll;
+}
 
 // Tries to create the Poll and returns the field errors it was rejected with.
 async function rejectionOf(question: string, options: string[]) {
@@ -99,4 +108,106 @@ describe("Poll", () => {
     const errors = await rejectionOf("저녁 메뉴", ["Pizza", "치킨", " pizza "]);
     expect(Object.keys(errors.eachOption ?? {})).toEqual(["2"]);
   });
+});
+
+describe("Vote and Results", () => {
+  test("after one Vote, the chosen Option has the only Vote", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    const [sea, mountain] = poll.options;
+
+    await castVote({ pollId: poll.id, optionId: sea.id, voterId: voterId() });
+    const results = await getResults({ pollId: poll.id, viewerId: voterId() });
+
+    expect(results?.totalVotes).toBe(1);
+    expect(results?.options).toEqual([
+      { id: sea.id, label: "바다", votes: 1, percent: 100 },
+      { id: mountain.id, label: "산", votes: 0, percent: 0 },
+    ]);
+  });
+
+  test("Results count every Vote and round each Option's share to a whole percent", async () => {
+    const poll = await pollWith(["바다", "산", "도시"]);
+    const [sea, mountain] = poll.options;
+
+    for (const optionId of [sea.id, sea.id, mountain.id]) {
+      await castVote({ pollId: poll.id, optionId, voterId: voterId() });
+    }
+    const results = await getResults({ pollId: poll.id, viewerId: voterId() });
+
+    expect(results?.totalVotes).toBe(3);
+    expect(results?.options.map((o) => [o.votes, o.percent])).toEqual([
+      [2, 67],
+      [1, 33],
+      [0, 0],
+    ]);
+  });
+
+  test("a Poll with no Votes shows every Option at 0%", async () => {
+    const poll = await pollWith(["바다", "산"]);
+
+    const results = await getResults({ pollId: poll.id, viewerId: voterId() });
+
+    expect(results?.totalVotes).toBe(0);
+    expect(results?.options.map((o) => [o.votes, o.percent])).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+  });
+
+  test("Results tell a Voter which Option they chose", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    const mountain = poll.options[1];
+    const me = voterId();
+
+    await castVote({ pollId: poll.id, optionId: mountain.id, voterId: me });
+
+    expect((await getResults({ pollId: poll.id, viewerId: me }))?.chosenOptionId).toBe(mountain.id);
+  });
+
+  test("Results show no choice to someone who hasn't voted", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
+
+    expect((await getResults({ pollId: poll.id, viewerId: voterId() }))?.chosenOptionId).toBeUndefined();
+  });
+
+  test("Results show no choice when the viewer is unknown", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
+
+    expect((await getResults({ pollId: poll.id }))?.chosenOptionId).toBeUndefined();
+  });
+
+  test("a Vote for an Option of another Poll is rejected and not counted", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    const other = await pollWith(["짜장", "짬뽕"]);
+
+    const result = await castVote({
+      pollId: poll.id,
+      optionId: other.options[0].id,
+      voterId: voterId(),
+    });
+
+    expect(result.status).toBe("option-not-in-poll");
+    expect((await getResults({ pollId: poll.id }))?.totalVotes).toBe(0);
+    expect((await getResults({ pollId: other.id }))?.totalVotes).toBe(0);
+  });
+
+  test("a Vote on a Poll that doesn't exist reports the Poll as not found", async () => {
+    const result = await castVote({ pollId: "no-such-poll", optionId: "1", voterId: voterId() });
+    expect(result.status).toBe("poll-not-found");
+  });
+
+  test("Results of a Poll that doesn't exist are nothing", async () => {
+    expect(await getResults({ pollId: "no-such-poll" })).toBeNull();
+  });
+
+  test.each(["", "abc", "1; DROP TABLE votes"])(
+    "a Vote with a malformed Option id %j is rejected",
+    async (optionId) => {
+      const poll = await pollWith(["바다", "산"]);
+      const result = await castVote({ pollId: poll.id, optionId, voterId: voterId() });
+      expect(result.status).toBe("option-not-in-poll");
+    },
+  );
 });

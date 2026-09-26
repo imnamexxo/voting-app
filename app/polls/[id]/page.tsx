@@ -1,24 +1,23 @@
 import { notFound } from "next/navigation";
-import { getPoll } from "@/lib/polls";
+import { getPoll, getResults } from "@/lib/polls";
+import { readVisitorId } from "@/lib/visitor";
+import { ResultsView } from "./results-view";
+import { VoteForm } from "./vote-form";
 
 export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
   const { id } = await params;
-  const poll = await getPoll(id);
-  if (!poll) notFound();
+  const viewerId = await readVisitorId();
+  const [poll, results] = await Promise.all([getPoll(id), getResults({ pollId: id, viewerId })]);
+  if (!poll || !results) notFound();
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-12">
       <h1 className="text-2xl font-semibold">{poll.question}</h1>
-      <ul className="mt-8 flex flex-col gap-2">
-        {poll.options.map((option) => (
-          <li
-            key={option.id}
-            className="rounded-md border border-zinc-300 px-3 py-2 dark:border-zinc-700"
-          >
-            {option.label}
-          </li>
-        ))}
-      </ul>
+      {results.chosenOptionId ? (
+        <ResultsView results={results} />
+      ) : (
+        <VoteForm pollId={poll.id} options={poll.options} />
+      )}
     </main>
   );
 }

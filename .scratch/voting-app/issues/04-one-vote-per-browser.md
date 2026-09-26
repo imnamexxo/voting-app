@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] `votes`의 (poll_id, voter_id)에 유일성 제약을 거는 마이그레이션이 있다
+- [ ] `votes`의 (poll_id, voter_id)에 유일성 제약을 거는 마이그레이션이 있다. 03 이후 DB에 쌓였을 수 있는 중복 Vote를 먼저 정리해야 마이그레이션이 실패하지 않는다(가장 이른 Vote만 남김)
 - [ ] 같은 Voter의 두 번째 `castVote`는 오류가 아니라 "이미 Vote함" 결과를 돌려준다
 - [ ] 같은 Voter가 동시에 보낸 두 `castVote` 중 하나만 저장되고, 다른 하나는 "이미 Vote함"이 된다 (테스트로 검증)
 - [ ] 이미 Vote한 Voter가 Poll 페이지를 열면 Vote 폼 대신 Results가 보인다
