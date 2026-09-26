@@ -5,12 +5,20 @@ import { castVote, createPoll, getPoll, getResults, PollValidationError } from "
 const creatorId = () => `test-creator-${randomUUID()}`;
 const voterId = () => `test-voter-${randomUUID()}`;
 
-// Creates a Poll and returns it with its Option ids.
+// Creates a Poll and returns it with its Option ids and its Creator.
 async function pollWith(options: string[]) {
-  const pollId = await createPoll({ question: "어디로 갈까요?", options, creatorId: creatorId() });
+  const creator = creatorId();
+  const pollId = await createPoll({ question: "어디로 갈까요?", options, creatorId: creator });
   const poll = await getPoll(pollId);
   if (!poll) throw new Error("created Poll not found");
-  return poll;
+  return { ...poll, creatorId: creator };
+}
+
+// The Results as the viewer sees them; fails the test if they are hidden or the Poll is missing.
+async function resultsSeenBy(pollId: string, viewerId: string) {
+  const access = await getResults({ pollId, viewerId });
+  if (access?.status !== "visible") throw new Error(`Results not visible: ${JSON.stringify(access)}`);
+  return access.results;
 }
 
 // Tries to create the Poll and returns the field errors it was rejected with.
@@ -116,10 +124,10 @@ describe("Vote and Results", () => {
     const [sea, mountain] = poll.options;
 
     await castVote({ pollId: poll.id, optionId: sea.id, voterId: voterId() });
-    const results = await getResults({ pollId: poll.id, viewerId: voterId() });
+    const results = await resultsSeenBy(poll.id, poll.creatorId);
 
-    expect(results?.totalVotes).toBe(1);
-    expect(results?.options).toEqual([
+    expect(results.totalVotes).toBe(1);
+    expect(results.options).toEqual([
       { id: sea.id, label: "바다", votes: 1, percent: 100 },
       { id: mountain.id, label: "산", votes: 0, percent: 0 },
     ]);
@@ -132,10 +140,10 @@ describe("Vote and Results", () => {
     for (const optionId of [sea.id, sea.id, mountain.id]) {
       await castVote({ pollId: poll.id, optionId, voterId: voterId() });
     }
-    const results = await getResults({ pollId: poll.id, viewerId: voterId() });
+    const results = await resultsSeenBy(poll.id, poll.creatorId);
 
-    expect(results?.totalVotes).toBe(3);
-    expect(results?.options.map((o) => [o.votes, o.percent])).toEqual([
+    expect(results.totalVotes).toBe(3);
+    expect(results.options.map((o) => [o.votes, o.percent])).toEqual([
       [2, 67],
       [1, 33],
       [0, 0],
@@ -145,10 +153,10 @@ describe("Vote and Results", () => {
   test("a Poll with no Votes shows every Option at 0%", async () => {
     const poll = await pollWith(["바다", "산"]);
 
-    const results = await getResults({ pollId: poll.id, viewerId: voterId() });
+    const results = await resultsSeenBy(poll.id, poll.creatorId);
 
-    expect(results?.totalVotes).toBe(0);
-    expect(results?.options.map((o) => [o.votes, o.percent])).toEqual([
+    expect(results.totalVotes).toBe(0);
+    expect(results.options.map((o) => [o.votes, o.percent])).toEqual([
       [0, 0],
       [0, 0],
     ]);
@@ -161,21 +169,14 @@ describe("Vote and Results", () => {
 
     await castVote({ pollId: poll.id, optionId: mountain.id, voterId: me });
 
-    expect((await getResults({ pollId: poll.id, viewerId: me }))?.chosenOptionId).toBe(mountain.id);
+    expect((await resultsSeenBy(poll.id, me)).chosenOptionId).toBe(mountain.id);
   });
 
-  test("Results show no choice to someone who hasn't voted", async () => {
+  test("Results show no choice to a Creator who hasn't voted", async () => {
     const poll = await pollWith(["바다", "산"]);
     await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
 
-    expect((await getResults({ pollId: poll.id, viewerId: voterId() }))?.chosenOptionId).toBeUndefined();
-  });
-
-  test("Results show no choice when the viewer is unknown", async () => {
-    const poll = await pollWith(["바다", "산"]);
-    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
-
-    expect((await getResults({ pollId: poll.id }))?.chosenOptionId).toBeUndefined();
+    expect((await resultsSeenBy(poll.id, poll.creatorId)).chosenOptionId).toBeUndefined();
   });
 
   test("a Vote for an Option of another Poll is rejected and not counted", async () => {
@@ -189,8 +190,8 @@ describe("Vote and Results", () => {
     });
 
     expect(result.status).toBe("option-not-in-poll");
-    expect((await getResults({ pollId: poll.id }))?.totalVotes).toBe(0);
-    expect((await getResults({ pollId: other.id }))?.totalVotes).toBe(0);
+    expect((await resultsSeenBy(poll.id, poll.creatorId)).totalVotes).toBe(0);
+    expect((await resultsSeenBy(other.id, other.creatorId)).totalVotes).toBe(0);
   });
 
   test("a Vote on a Poll that doesn't exist reports the Poll as not found", async () => {
@@ -222,8 +223,8 @@ describe("One Vote per Voter", () => {
     const second = await castVote({ pollId: poll.id, optionId: mountain.id, voterId: me });
 
     expect(second.status).toBe("already-voted");
-    const results = await getResults({ pollId: poll.id, viewerId: me });
-    expect(results?.options.map((o) => o.votes)).toEqual([1, 0]);
+    const results = await resultsSeenBy(poll.id, me);
+    expect(results.options.map((o) => o.votes)).toEqual([1, 0]);
   });
 
   test("of two Votes a Voter sends at the same moment, exactly one is counted", async () => {
@@ -237,7 +238,7 @@ describe("One Vote per Voter", () => {
     ]);
 
     expect(statuses.map((r) => r.status).sort()).toEqual(["already-voted", "voted"]);
-    expect((await getResults({ pollId: poll.id }))?.totalVotes).toBe(1);
+    expect((await resultsSeenBy(poll.id, poll.creatorId)).totalVotes).toBe(1);
   });
 
   test("the same Voter can still vote on a different Poll", async () => {
@@ -249,5 +250,63 @@ describe("One Vote per Voter", () => {
     const result = await castVote({ pollId: second.id, optionId: second.options[0].id, voterId: me });
 
     expect(result.status).toBe("voted");
+  });
+});
+
+describe("Who sees Results", () => {
+  test("someone who hasn't voted and didn't create the Poll can't see its Results", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
+
+    expect(await getResults({ pollId: poll.id, viewerId: voterId() })).toEqual({ status: "hidden" });
+  });
+
+  test("an unknown viewer can't see a Poll's Results", async () => {
+    const poll = await pollWith(["바다", "산"]);
+
+    expect(await getResults({ pollId: poll.id })).toEqual({ status: "hidden" });
+  });
+
+  test("the Creator sees the Results without voting", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    await castVote({ pollId: poll.id, optionId: poll.options[1].id, voterId: voterId() });
+
+    expect((await resultsSeenBy(poll.id, poll.creatorId)).options.map((o) => o.votes)).toEqual([0, 1]);
+  });
+
+  test("the Creator can vote on their own Poll and sees their choice", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    const sea = poll.options[0];
+
+    const vote = await castVote({ pollId: poll.id, optionId: sea.id, voterId: poll.creatorId });
+
+    expect(vote.status).toBe("voted");
+    expect((await resultsSeenBy(poll.id, poll.creatorId)).chosenOptionId).toBe(sea.id);
+  });
+
+  test("a Voter sees the Results once they have voted", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    const me = voterId();
+
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: me });
+
+    expect((await getResults({ pollId: poll.id, viewerId: me }))?.status).toBe("visible");
+  });
+
+  test("Results say they are shown because the viewer is the Creator, until the Creator votes", async () => {
+    const poll = await pollWith(["바다", "산"]);
+
+    const access = await getResults({ pollId: poll.id, viewerId: poll.creatorId });
+
+    expect(access?.status === "visible" && access.reason).toBe("creator");
+  });
+
+  test("Results say they are shown because the viewer has voted", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: poll.creatorId });
+
+    const access = await getResults({ pollId: poll.id, viewerId: poll.creatorId });
+
+    expect(access?.status === "visible" && access.reason).toBe("voted");
   });
 });

@@ -140,34 +140,50 @@ export type Results = {
   chosenOptionId?: string;
 };
 
+// Whether the viewer may see a Poll's Results, and the Results when they may.
+// A Voter's own Vote takes precedence as the reason once the Creator has voted too.
+export type ResultsAccess =
+  | { status: "visible"; reason: "voted" | "creator"; results: Results }
+  | { status: "hidden" };
+
 export async function getResults(input: {
   pollId: string;
   viewerId?: string;
-}): Promise<Results | null> {
+}): Promise<ResultsAccess | null> {
   const rows = await sql`
     SELECT
       o.id,
       o.label,
       count(v.id)::int AS votes,
-      coalesce(bool_or(v.voter_id = ${input.viewerId ?? null}), false) AS chosen
+      coalesce(bool_or(v.voter_id = ${input.viewerId ?? null}), false) AS chosen,
+      coalesce(p.creator_id = ${input.viewerId ?? null}, false) AS viewer_is_creator
     FROM options o
+    JOIN polls p ON p.id = o.poll_id
     LEFT JOIN votes v ON v.option_id = o.id
     WHERE o.poll_id = ${input.pollId}
-    GROUP BY o.id
+    GROUP BY o.id, p.creator_id
     ORDER BY o.position
   `;
   if (rows.length === 0) return null;
 
-  const totalVotes = rows.reduce((sum, r) => sum + r.votes, 0);
+  // Results stay hidden until the viewer votes, so other Votes can't sway theirs. The Creator
+  // can always see them.
   const chosen = rows.find((r) => r.chosen);
+  if (!chosen && !rows[0].viewer_is_creator) return { status: "hidden" };
+
+  const totalVotes = rows.reduce((sum, r) => sum + r.votes, 0);
   return {
-    totalVotes,
-    chosenOptionId: chosen ? String(chosen.id) : undefined,
-    options: rows.map((r) => ({
-      id: String(r.id),
-      label: r.label,
-      votes: r.votes,
-      percent: totalVotes === 0 ? 0 : Math.round((r.votes / totalVotes) * 100),
-    })),
+    status: "visible",
+    reason: chosen ? "voted" : "creator",
+    results: {
+      totalVotes,
+      chosenOptionId: chosen ? String(chosen.id) : undefined,
+      options: rows.map((r) => ({
+        id: String(r.id),
+        label: r.label,
+        votes: r.votes,
+        percent: totalVotes === 0 ? 0 : Math.round((r.votes / totalVotes) * 100),
+      })),
+    },
   };
 }
