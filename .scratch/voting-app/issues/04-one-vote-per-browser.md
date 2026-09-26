@@ -6,8 +6,15 @@
 
 **Status:** ready-for-agent
 
-- [ ] `votes`의 (poll_id, voter_id)에 유일성 제약을 거는 마이그레이션이 있다. 03 이후 DB에 쌓였을 수 있는 중복 Vote를 먼저 정리해야 마이그레이션이 실패하지 않는다(가장 이른 Vote만 남김)
-- [ ] 같은 Voter의 두 번째 `castVote`는 오류가 아니라 "이미 Vote함" 결과를 돌려준다
-- [ ] 같은 Voter가 동시에 보낸 두 `castVote` 중 하나만 저장되고, 다른 하나는 "이미 Vote함"이 된다 (테스트로 검증)
-- [ ] 이미 Vote한 Voter가 Poll 페이지를 열면 Vote 폼 대신 Results가 보인다
-- [ ] 제출 중에는 Vote 버튼이 비활성화된다
+- [x] `votes`의 (poll_id, voter_id)에 유일성 제약을 거는 마이그레이션이 있다. 03 이후 DB에 쌓였을 수 있는 중복 Vote를 먼저 정리해야 마이그레이션이 실패하지 않는다(가장 이른 Vote만 남김)
+- [x] 같은 Voter의 두 번째 `castVote`는 오류가 아니라 "이미 Vote함" 결과를 돌려준다
+- [x] 같은 Voter가 동시에 보낸 두 `castVote` 중 하나만 저장되고, 다른 하나는 "이미 Vote함"이 된다 (테스트로 검증)
+- [x] 이미 Vote한 Voter가 Poll 페이지를 열면 Vote 폼 대신 Results가 보인다
+- [x] 제출 중에는 Vote 버튼이 비활성화된다
+
+## Comments
+
+- 구현 완료. 마이그레이션 0003이 개발 DB에서 중복 Vote 1개(03 이후 red 테스트가 만든 것)를 지우고 유일성 제약을 걸었다.
+- 이미 Vote한 Voter가 다시 제출하면 별도 안내 없이 Poll 페이지로 돌아가 Results(처음 고른 Option 강조)를 보여 준다.
+- 이미 Vote한 Voter가 다른 Poll의 Option으로 제출하면 "이 투표에 없는 선택지"로 답한다(스펙에 우선순위 규정 없음).
+- 마이그레이션의 중복 정리 단계는 자동 테스트가 없다. 0003은 이미 적용되어 수정하지 않았다(DELETE와 ALTER 사이에 끼어든 Vote가 있으면 ALTER가 실패하고 전체가 롤백되는 안전한 실패).

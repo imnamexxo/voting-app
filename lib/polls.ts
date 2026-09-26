@@ -94,7 +94,8 @@ export async function getPoll(pollId: string): Promise<Poll | null> {
 export type CastVoteResult =
   | { status: "voted" }
   | { status: "poll-not-found" }
-  | { status: "option-not-in-poll" };
+  | { status: "option-not-in-poll" }
+  | { status: "already-voted" };
 
 export async function castVote(input: {
   pollId: string;
@@ -102,17 +103,31 @@ export async function castVote(input: {
   voterId: string;
 }): Promise<CastVoteResult> {
   // Only inserts when the Option belongs to the Poll. Comparing as text means a malformed
-  // optionId from a tampered form simply matches nothing.
+  // optionId from a tampered form simply matches nothing. The unique constraint turns a
+  // second Vote, even one racing the first, into a no-op instead of an error.
   const inserted = await sql`
     INSERT INTO votes (poll_id, option_id, voter_id)
     SELECT o.poll_id, o.id, ${input.voterId}
     FROM options o
     WHERE o.id::text = ${input.optionId} AND o.poll_id = ${input.pollId}
+    ON CONFLICT ON CONSTRAINT votes_one_per_voter DO NOTHING
     RETURNING id
   `;
   if (inserted.length === 0) {
-    const [poll] = await sql`SELECT 1 FROM polls WHERE id = ${input.pollId}`;
-    return { status: poll ? "option-not-in-poll" : "poll-not-found" };
+    const [why] = await sql`
+      SELECT
+        EXISTS (SELECT 1 FROM polls WHERE id = ${input.pollId}) AS poll_exists,
+        EXISTS (
+          SELECT 1 FROM options WHERE id::text = ${input.optionId} AND poll_id = ${input.pollId}
+        ) AS option_in_poll,
+        EXISTS (
+          SELECT 1 FROM votes WHERE poll_id = ${input.pollId} AND voter_id = ${input.voterId}
+        ) AS already_voted
+    `;
+    if (!why.poll_exists) return { status: "poll-not-found" };
+    if (!why.option_in_poll) return { status: "option-not-in-poll" };
+    if (why.already_voted) return { status: "already-voted" };
+    throw new Error("Vote was not saved for an unknown reason");
   }
   return { status: "voted" };
 }

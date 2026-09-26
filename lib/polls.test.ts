@@ -211,3 +211,43 @@ describe("Vote and Results", () => {
     },
   );
 });
+
+describe("One Vote per Voter", () => {
+  test("a Voter's second Vote on the same Poll is refused and not counted", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    const [sea, mountain] = poll.options;
+    const me = voterId();
+
+    await castVote({ pollId: poll.id, optionId: sea.id, voterId: me });
+    const second = await castVote({ pollId: poll.id, optionId: mountain.id, voterId: me });
+
+    expect(second.status).toBe("already-voted");
+    const results = await getResults({ pollId: poll.id, viewerId: me });
+    expect(results?.options.map((o) => o.votes)).toEqual([1, 0]);
+  });
+
+  test("of two Votes a Voter sends at the same moment, exactly one is counted", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    const [sea, mountain] = poll.options;
+    const me = voterId();
+
+    const statuses = await Promise.all([
+      castVote({ pollId: poll.id, optionId: sea.id, voterId: me }),
+      castVote({ pollId: poll.id, optionId: mountain.id, voterId: me }),
+    ]);
+
+    expect(statuses.map((r) => r.status).sort()).toEqual(["already-voted", "voted"]);
+    expect((await getResults({ pollId: poll.id }))?.totalVotes).toBe(1);
+  });
+
+  test("the same Voter can still vote on a different Poll", async () => {
+    const first = await pollWith(["바다", "산"]);
+    const second = await pollWith(["짜장", "짬뽕"]);
+    const me = voterId();
+
+    await castVote({ pollId: first.id, optionId: first.options[0].id, voterId: me });
+    const result = await castVote({ pollId: second.id, optionId: second.options[0].id, voterId: me });
+
+    expect(result.status).toBe("voted");
+  });
+});
