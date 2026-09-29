@@ -27,3 +27,11 @@ _Avoid_: Owner, Admin, Author
 **Results**:
 한 Poll에서 Option별 Vote 수와 비율을 모은 것.
 _Avoid_: Tally, Stats, Score
+
+**Closing time**:
+Poll을 만들 때 선택적으로 정하는 시각. 이 시각부터는 그 Poll에 Vote할 수 없다. 화면에서는 "마감 시간"으로 표시한다.
+_Avoid_: Deadline, Expiry, End time, 종료 시간
+
+**Closed**:
+Closing time이 지난 Poll의 상태. Closing time이 없는 Poll은 Closed가 되지 않는다. 화면에서는 "마감됨"으로 표시한다.
+_Avoid_: Expired, Ended, Finished, 종료됨

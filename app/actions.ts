@@ -7,7 +7,8 @@ import { getOrIssueVisitorId } from "@/lib/visitor";
 export type CreatePollState = {
   errors?: PollFieldErrors;
   // What was submitted, so the form can be refilled even without JavaScript.
-  submitted?: { question: string; options: string[] };
+  // closingTime is the datetime-local field's own value, without an offset.
+  submitted?: { question: string; options: string[]; closingTime: string };
 };
 
 export async function createPollAction(
@@ -17,11 +18,19 @@ export async function createPollAction(
   const submitted = {
     question: String(formData.get("question") ?? ""),
     options: formData.getAll("option").map(String),
+    closingTime: String(formData.get("closingTimeLocal") ?? ""),
   };
+  // With JavaScript on, the form also sends the same time with the browser's UTC offset.
+  // Without it only the local value arrives, and the Poll module reads that as Korean time.
+  const closingTime = String(formData.get("closingTime") ?? "") || submitted.closingTime;
 
   let pollId: string;
   try {
-    pollId = await createPoll({ ...submitted, creatorId: await getOrIssueVisitorId() });
+    pollId = await createPoll({
+      ...submitted,
+      closingTime,
+      creatorId: await getOrIssueVisitorId(),
+    });
   } catch (err) {
     if (err instanceof PollValidationError) return { errors: err.fieldErrors, submitted };
     throw err;

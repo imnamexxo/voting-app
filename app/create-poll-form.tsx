@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useSyncExternalStore } from "react";
 import { createPollAction, type CreatePollState } from "./actions";
 
 type Limits = { minOptions: number; maxOptions: number };
@@ -17,6 +17,26 @@ type OptionRow = { id: number; label: string };
 
 const toRows = (labels: string[]): OptionRow[] => labels.map((label, id) => ({ id, label }));
 
+// False while rendering on the server and hydrating, true once JavaScript runs in the browser.
+const noSubscription = () => () => {};
+const useIsClient = () =>
+  useSyncExternalStore(
+    noSubscription,
+    () => true,
+    () => false,
+  );
+
+// Adds the browser's UTC offset at that moment to a datetime-local value, so the server gets
+// the time the Creator meant wherever they are. Returns "" for a blank or incomplete value.
+function withBrowserOffset(local: string): string {
+  const date = new Date(local); // A datetime-local value is parsed as the browser's local time.
+  if (local === "" || Number.isNaN(date.getTime())) return "";
+  const minutes = -date.getTimezoneOffset();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const abs = Math.abs(minutes);
+  return `${local}${minutes < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
 export function CreatePollForm({ limits }: { limits: Limits }) {
   const [state, formAction, pending] = useActionState<CreatePollState, FormData>(
     createPollAction,
@@ -32,6 +52,8 @@ export function CreatePollForm({ limits }: { limits: Limits }) {
         : Array(limits.minOptions).fill(""),
     ),
   );
+  const [closingTime, setClosingTime] = useState(() => state.submitted?.closingTime ?? "");
+  const isClient = useIsClient();
   // Per-Option errors point at positions in the last submit, so removing an Option makes them
   // point at the wrong fields. Hide them until the next submit returns a fresh state.
   const [staleState, setStaleState] = useState<CreatePollState | null>(null);
@@ -99,6 +121,28 @@ export function CreatePollForm({ limits }: { limits: Limits }) {
           </button>
         )}
       </fieldset>
+
+      <label className="flex flex-col gap-2">
+        <span className="font-medium">
+          마감 시간 <span className="font-normal text-zinc-500">(선택)</span>
+        </span>
+        <input
+          type="datetime-local"
+          name="closingTimeLocal"
+          value={closingTime}
+          onChange={(e) => setClosingTime(e.target.value)}
+          aria-invalid={Boolean(errors.closingTime)}
+          aria-describedby="closing-time-hint"
+          className={inputClass}
+        />
+        <span id="closing-time-hint" className="text-sm text-zinc-600 dark:text-zinc-400">
+          비워 두면 마감 없이 계속 열려 있어요.
+        </span>
+        <FieldError message={errors.closingTime} />
+      </label>
+      {isClient && (
+        <input type="hidden" name="closingTime" value={withBrowserOffset(closingTime)} />
+      )}
 
       <button
         type="submit"

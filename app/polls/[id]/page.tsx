@@ -2,13 +2,19 @@ import { notFound } from "next/navigation";
 import { getPoll, getResults } from "@/lib/polls";
 import { readVisitorId } from "@/lib/visitor";
 import { CopyLinkButton } from "./copy-link-button";
+import { formatClosingTime } from "./format-closing-time";
 import { ResultsView } from "./results-view";
 import { VoteForm } from "./vote-form";
 
 export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
   const { id } = await params;
   const viewerId = await readVisitorId();
-  const [poll, access] = await Promise.all([getPoll(id), getResults({ pollId: id, viewerId })]);
+  // One moment for both calls, so they agree on whether the Poll is Closed.
+  const now = new Date();
+  const [poll, access] = await Promise.all([
+    getPoll(id, { now }),
+    getResults({ pollId: id, viewerId }),
+  ]);
   if (!poll || !access) notFound();
 
   // Who may see the Results is decided by the Poll module. Only visible Results reach the page,
@@ -21,6 +27,11 @@ export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
       <div className="mt-4">
         <CopyLinkButton pollId={poll.id} />
       </div>
+      {poll.closingTime && (
+        <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
+          {formatClosingTime(poll.closingTime)}까지 투표할 수 있어요
+        </p>
+      )}
       {!hasVoted && <VoteForm pollId={poll.id} options={poll.options} />}
       {access.status === "visible" && (
         <>

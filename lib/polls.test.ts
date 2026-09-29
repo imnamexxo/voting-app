@@ -6,10 +6,15 @@ const creatorId = () => `test-creator-${randomUUID()}`;
 const voterId = () => `test-voter-${randomUUID()}`;
 
 // Creates a Poll and returns it with its Option ids and its Creator.
-async function pollWith(options: string[]) {
+async function pollWith(options: string[], timing: { closingTime?: string; now?: Date } = {}) {
   const creator = creatorId();
-  const pollId = await createPoll({ question: "어디로 갈까요?", options, creatorId: creator });
-  const poll = await getPoll(pollId);
+  const pollId = await createPoll({
+    question: "어디로 갈까요?",
+    options,
+    creatorId: creator,
+    ...timing,
+  });
+  const poll = await getPoll(pollId, { now: timing.now });
   if (!poll) throw new Error("created Poll not found");
   return { ...poll, creatorId: creator };
 }
@@ -22,9 +27,13 @@ async function resultsSeenBy(pollId: string, viewerId: string) {
 }
 
 // Tries to create the Poll and returns the field errors it was rejected with.
-async function rejectionOf(question: string, options: string[]) {
+async function rejectionOf(
+  question: string,
+  options: string[],
+  timing: { closingTime?: string; now?: Date } = {},
+) {
   try {
-    await createPoll({ question, options, creatorId: creatorId() });
+    await createPoll({ question, options, creatorId: creatorId(), ...timing });
   } catch (err) {
     if (err instanceof PollValidationError) return err.fieldErrors;
     throw err;
@@ -308,5 +317,67 @@ describe("Who sees Results", () => {
     const access = await getResults({ pollId: poll.id, viewerId: poll.creatorId });
 
     expect(access?.status === "visible" && access.reason).toBe("voted");
+  });
+});
+
+describe("Closing time", () => {
+  test("a Poll created without a Closing time has none and is not Closed", async () => {
+    const poll = await pollWith(["바다", "산"]);
+
+    expect(poll.closingTime).toBeNull();
+    expect(poll.closed).toBe(false);
+  });
+
+  test("a Poll with a future Closing time is open until then and Closed from that moment", async () => {
+    const poll = await pollWith(["바다", "산"], {
+      closingTime: "2026-10-03T18:00:00+09:00",
+      now: new Date("2026-10-01T12:00:00+09:00"),
+    });
+
+    expect(poll.closingTime).toEqual(new Date("2026-10-03T09:00:00Z"));
+    const closedAt = async (now: string) => (await getPoll(poll.id, { now: new Date(now) }))?.closed;
+    expect(await closedAt("2026-10-03T17:59:59.999+09:00")).toBe(false);
+    expect(await closedAt("2026-10-03T18:00:00+09:00")).toBe(true);
+    expect(await closedAt("2026-10-04T00:00:00+09:00")).toBe(true);
+  });
+
+  test.each([
+    ["in the past", "2026-10-01T11:59:00+09:00"],
+    ["right now", "2026-10-01T12:00:00+09:00"],
+  ])("a Closing time %s is rejected", async (_, closingTime) => {
+    const errors = await rejectionOf("주말에 어디 갈까요?", ["바다", "산"], {
+      closingTime,
+      now: new Date("2026-10-01T12:00:00+09:00"),
+    });
+    expect(errors).toEqual({ closingTime: "마감 시간은 지금보다 뒤여야 해요." });
+  });
+
+  test("a Closing time is rejected together with the other field errors", async () => {
+    const errors = await rejectionOf("  ", ["바다"], {
+      closingTime: "2026-09-30T18:00:00+09:00",
+      now: new Date("2026-10-01T12:00:00+09:00"),
+    });
+    expect(Object.keys(errors).sort()).toEqual(["closingTime", "options", "question"]);
+  });
+
+  test.each(["내일 저녁", "2026-13-01T18:00", "2026-10-03"])(
+    "a Closing time that can't be read, %j, is rejected",
+    async (closingTime) => {
+      const errors = await rejectionOf("주말에 어디 갈까요?", ["바다", "산"], { closingTime });
+      expect(Object.keys(errors)).toEqual(["closingTime"]);
+    },
+  );
+
+  test("a Closing time without an offset is read as Korean time", async () => {
+    const poll = await pollWith(["바다", "산"], {
+      closingTime: "2026-10-03T18:00",
+      now: new Date("2026-10-01T12:00:00+09:00"),
+    });
+    expect(poll.closingTime).toEqual(new Date("2026-10-03T09:00:00Z"));
+  });
+
+  test("a blank Closing time means the Poll has none", async () => {
+    const poll = await pollWith(["바다", "산"], { closingTime: "" });
+    expect(poll.closingTime).toBeNull();
   });
 });

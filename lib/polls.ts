@@ -2,7 +2,14 @@ import { randomBytes } from "node:crypto";
 import { sql } from "./db";
 
 export type Option = { id: string; label: string };
-export type Poll = { id: string; question: string; options: Option[] };
+export type Poll = {
+  id: string;
+  question: string;
+  options: Option[];
+  // When the Poll stops taking Votes, or null if it never closes.
+  closingTime: Date | null;
+  closed: boolean;
+};
 
 export const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 10;
@@ -18,6 +25,7 @@ export type PollFieldErrors = {
   options?: string;
   // Errors for individual Options, keyed by their position in the input.
   eachOption?: Record<number, string>;
+  closingTime?: string;
 };
 
 export class PollValidationError extends Error {
@@ -26,10 +34,31 @@ export class PollValidationError extends Error {
   }
 }
 
+// Every time-based decision uses the app server's clock. Callers pass `now` to control it.
+const isClosed = (closingTime: Date | null, now: Date) =>
+  closingTime !== null && closingTime.getTime() <= now.getTime();
+
+// An ISO date and time, as a datetime-local field sends it, optionally with a UTC offset.
+const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
+
+// A value without an offset comes from the form with JavaScript off, so it is read as
+// Korean time. Blank means no Closing time.
+function parseClosingTime(text: string): Date | null | "invalid" {
+  const value = text.trim();
+  if (value === "") return null;
+  if (!DATE_TIME.test(value)) return "invalid";
+  const hasOffset = /(Z|[+-]\d{2}:\d{2})$/.test(value);
+  const date = new Date(hasOffset ? value : `${value}+09:00`);
+  return Number.isNaN(date.getTime()) ? "invalid" : date;
+}
+
 export async function createPoll(input: {
   question: string;
   options: string[];
   creatorId: string;
+  // An ISO date and time. Without an offset it is read as Korean time.
+  closingTime?: string;
+  now?: Date;
 }): Promise<string> {
   const question = input.question.trim();
   const options = input.options.map((label) => label.trim());
@@ -54,7 +83,14 @@ export async function createPoll(input: {
   });
   if (Object.keys(eachOption).length > 0) errors.eachOption = eachOption;
 
-  if (Object.keys(errors).length > 0) throw new PollValidationError(errors);
+  const closingTime = parseClosingTime(input.closingTime ?? "");
+  if (closingTime === "invalid") errors.closingTime = "마감 시간을 다시 골라 주세요.";
+  else if (closingTime && isClosed(closingTime, input.now ?? new Date()))
+    errors.closingTime = "마감 시간은 지금보다 뒤여야 해요.";
+
+  // The second check is already covered by the first; it only narrows closingTime's type.
+  if (Object.keys(errors).length > 0 || closingTime === "invalid")
+    throw new PollValidationError(errors);
 
   // 16 URL-safe characters, so Poll links can't be guessed by counting.
   const id = randomBytes(12).toString("base64url");
@@ -62,8 +98,8 @@ export async function createPoll(input: {
   // One statement, so the Poll and its Options are saved together or not at all.
   await sql`
     WITH poll AS (
-      INSERT INTO polls (id, question, creator_id)
-      VALUES (${id}, ${question}, ${input.creatorId})
+      INSERT INTO polls (id, question, creator_id, closes_at)
+      VALUES (${id}, ${question}, ${input.creatorId}, ${closingTime?.toISOString() ?? null})
       RETURNING id
     )
     INSERT INTO options (poll_id, label, position)
@@ -74,9 +110,12 @@ export async function createPoll(input: {
   return id;
 }
 
-export async function getPoll(pollId: string): Promise<Poll | null> {
+export async function getPoll(
+  pollId: string,
+  { now = new Date() }: { now?: Date } = {},
+): Promise<Poll | null> {
   const rows = await sql`
-    SELECT p.id, p.question, o.id AS option_id, o.label
+    SELECT p.id, p.question, p.closes_at, o.id AS option_id, o.label
     FROM polls p
     JOIN options o ON o.poll_id = p.id
     WHERE p.id = ${pollId}
@@ -84,10 +123,13 @@ export async function getPoll(pollId: string): Promise<Poll | null> {
   `;
   if (rows.length === 0) return null;
 
+  const closingTime: Date | null = rows[0].closes_at === null ? null : new Date(rows[0].closes_at);
   return {
     id: rows[0].id,
     question: rows[0].question,
     options: rows.map((r) => ({ id: String(r.option_id), label: r.label })),
+    closingTime,
+    closed: isClosed(closingTime, now),
   };
 }
 
