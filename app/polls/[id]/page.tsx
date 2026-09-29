@@ -13,7 +13,7 @@ export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
   const now = new Date();
   const [poll, access] = await Promise.all([
     getPoll(id, { now }),
-    getResults({ pollId: id, viewerId }),
+    getResults({ pollId: id, viewerId, now }),
   ]);
   if (!poll || !access) notFound();
 

@@ -192,15 +192,17 @@ export type Results = {
   chosenOptionId?: string;
 };
 
-// Whether the viewer may see a Poll's Results, and the Results when they may.
-// A Voter's own Vote takes precedence as the reason once the Creator has voted too.
+// Whether the viewer may see a Poll's Results, and the Results when they may. When several
+// reasons apply, the viewer's own Vote comes first, then the Poll being Closed, then being
+// its Creator.
 export type ResultsAccess =
-  | { status: "visible"; reason: "voted" | "creator"; results: Results }
+  | { status: "visible"; reason: "voted" | "closed" | "creator"; results: Results }
   | { status: "hidden" };
 
 export async function getResults(input: {
   pollId: string;
   viewerId?: string;
+  now?: Date;
 }): Promise<ResultsAccess | null> {
   const rows = await sql`
     SELECT
@@ -208,25 +210,29 @@ export async function getResults(input: {
       o.label,
       count(v.id)::int AS votes,
       coalesce(bool_or(v.voter_id = ${input.viewerId ?? null}), false) AS chosen,
-      coalesce(p.creator_id = ${input.viewerId ?? null}, false) AS viewer_is_creator
+      coalesce(p.creator_id = ${input.viewerId ?? null}, false) AS viewer_is_creator,
+      p.closes_at
     FROM options o
     JOIN polls p ON p.id = o.poll_id
     LEFT JOIN votes v ON v.option_id = o.id
     WHERE o.poll_id = ${input.pollId}
-    GROUP BY o.id, p.creator_id
+    GROUP BY o.id, p.creator_id, p.closes_at
     ORDER BY o.position
   `;
   if (rows.length === 0) return null;
 
-  // Results stay hidden until the viewer votes, so other Votes can't sway theirs. The Creator
-  // can always see them.
+  // While the Poll is open, Results stay hidden until the viewer votes, so other Votes can't
+  // sway theirs. The Creator can always see them. Once it is Closed, Votes can't change, so
+  // anyone can.
   const chosen = rows.find((r) => r.chosen);
-  if (!chosen && !rows[0].viewer_is_creator) return { status: "hidden" };
+  const closingTime = rows[0].closes_at === null ? null : new Date(rows[0].closes_at);
+  const closed = isClosed(closingTime, input.now ?? new Date());
+  if (!chosen && !closed && !rows[0].viewer_is_creator) return { status: "hidden" };
 
   const totalVotes = rows.reduce((sum, r) => sum + r.votes, 0);
   return {
     status: "visible",
-    reason: chosen ? "voted" : "creator",
+    reason: chosen ? "voted" : closed ? "closed" : "creator",
     results: {
       totalVotes,
       chosenOptionId: chosen ? String(chosen.id) : undefined,

@@ -444,3 +444,52 @@ describe("Voting after the Closing time", () => {
   });
 });
 
+
+describe("Who sees Results after the Closing time", () => {
+  const closingTime = "2026-10-03T18:00:00+09:00";
+  const beforeClosing = new Date("2026-10-03T12:00:00+09:00");
+  const afterClosing = new Date("2026-10-03T18:00:00+09:00");
+  const closingPoll = () =>
+    pollWith(["바다", "산"], { closingTime, now: new Date("2026-10-01T12:00:00+09:00") });
+
+  test("someone who never voted sees a Closed Poll's Results because it is Closed", async () => {
+    const poll = await closingPoll();
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId(), now: beforeClosing });
+
+    const access = await getResults({ pollId: poll.id, viewerId: voterId(), now: afterClosing });
+
+    expect(access?.status === "visible" && access.reason).toBe("closed");
+    expect(access?.status === "visible" && access.results.options.map((o) => o.votes)).toEqual([1, 0]);
+  });
+
+  test("a Voter who voted before the Poll closed sees their choice because they voted", async () => {
+    const poll = await closingPoll();
+    const mountain = poll.options[1];
+    const me = voterId();
+    await castVote({ pollId: poll.id, optionId: mountain.id, voterId: me, now: beforeClosing });
+
+    const access = await getResults({ pollId: poll.id, viewerId: me, now: afterClosing });
+
+    expect(access?.status === "visible" && access.reason).toBe("voted");
+    expect(access?.status === "visible" && access.results.chosenOptionId).toBe(mountain.id);
+  });
+
+  test("a Creator who didn't vote sees a Closed Poll's Results because it is Closed", async () => {
+    const poll = await closingPoll();
+
+    const access = await getResults({ pollId: poll.id, viewerId: poll.creatorId, now: afterClosing });
+
+    expect(access?.status === "visible" && access.reason).toBe("closed");
+  });
+
+  test("before the Closing time, Results are still hidden from someone who hasn't voted", async () => {
+    const poll = await closingPoll();
+
+    expect(await getResults({ pollId: poll.id, viewerId: voterId(), now: beforeClosing })).toEqual({
+      status: "hidden",
+    });
+    const creatorAccess = await getResults({ pollId: poll.id, viewerId: poll.creatorId, now: beforeClosing });
+    expect(creatorAccess?.status === "visible" && creatorAccess.reason).toBe("creator");
+  });
+});
+
