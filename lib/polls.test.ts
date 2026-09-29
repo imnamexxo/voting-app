@@ -360,7 +360,7 @@ describe("Closing time", () => {
     expect(Object.keys(errors).sort()).toEqual(["closingTime", "options", "question"]);
   });
 
-  test.each(["내일 저녁", "2026-13-01T18:00", "2026-10-03"])(
+  test.each(["내일 저녁", "2026-13-01T18:00", "2026-10-03", "2027-02-30T10:00", "2027-10-03T24:00"])(
     "a Closing time that can't be read, %j, is rejected",
     async (closingTime) => {
       const errors = await rejectionOf("주말에 어디 갈까요?", ["바다", "산"], { closingTime });

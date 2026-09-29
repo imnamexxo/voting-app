@@ -47,6 +47,12 @@ function parseClosingTime(text: string): Date | null | "invalid" {
   const value = text.trim();
   if (value === "") return null;
   if (!DATE_TIME.test(value)) return "invalid";
+  // Date rolls impossible values over (Feb 30 becomes Mar 2), so check the calendar first.
+  const [year, month, day, hour, minute] = value.match(/\d+/g)!.slice(0, 5).map(Number);
+  const calendarDay = new Date(Date.UTC(year, month - 1, day));
+  if (calendarDay.getUTCMonth() !== month - 1 || calendarDay.getUTCDate() !== day) return "invalid";
+  if (hour > 23 || minute > 59) return "invalid";
+
   const hasOffset = /(Z|[+-]\d{2}:\d{2})$/.test(value);
   const date = new Date(hasOffset ? value : `${value}+09:00`);
   return Number.isNaN(date.getTime()) ? "invalid" : date;
