@@ -1,6 +1,7 @@
 "use server";
 
 import { notFound, redirect } from "next/navigation";
+import { isOperator } from "@/lib/operator";
 import { castVote, createPoll, PollValidationError, type PollFieldErrors } from "@/lib/polls";
 import { getOrIssueVisitorId } from "@/lib/visitor";
 
@@ -15,6 +16,10 @@ export async function createPollAction(
   _prev: CreatePollState,
   formData: FormData,
 ): Promise<CreatePollState> {
+  // Only the Operator makes Polls. The page checks too, but a Server Action can be called
+  // directly, so it checks for itself.
+  if (!(await isOperator())) redirect("/operator/login");
+
   const submitted = {
     question: String(formData.get("question") ?? ""),
     options: formData.getAll("option").map(String),

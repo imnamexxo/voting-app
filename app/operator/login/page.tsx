@@ -3,7 +3,7 @@ import { isOperator } from "@/lib/operator";
 import { LoginForm } from "./login-form";
 
 export default async function OperatorLoginPage() {
-  if (await isOperator()) redirect("/operator");
+  if (await isOperator()) redirect("/admin");
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-12">

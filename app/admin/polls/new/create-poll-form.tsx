@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState, useSyncExternalStore } from "react";
-import { createPollAction, type CreatePollState } from "./actions";
+import { createPollAction, type CreatePollState } from "@/app/actions";
 
 type Limits = { minOptions: number; maxOptions: number };
 

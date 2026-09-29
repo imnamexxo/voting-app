@@ -12,7 +12,7 @@ export async function signInAction(_prev: SignInState, formData: FormData): Prom
     return { error: "비밀번호가 맞지 않아요." };
 
   await startOperatorSession();
-  redirect("/operator");
+  redirect("/admin");
 }
 
 export async function signOutAction(): Promise<void> {

@@ -139,6 +139,37 @@ export async function getPoll(
   };
 }
 
+// A Poll as it appears in a list. totalVotes is for the Operator's dashboard; pages anyone can
+// open must not show it, or Results would leak before people vote.
+export type PollSummary = {
+  id: string;
+  question: string;
+  totalVotes: number;
+  closingTime: Date | null;
+  closed: boolean;
+};
+
+// Every Poll, newest first.
+export async function listPolls({ now = new Date() }: { now?: Date } = {}): Promise<PollSummary[]> {
+  const rows = await sql`
+    SELECT p.id, p.question, p.closes_at, count(v.id)::int AS total_votes
+    FROM polls p
+    LEFT JOIN votes v ON v.poll_id = p.id
+    GROUP BY p.id
+    ORDER BY p.created_at DESC, p.id
+  `;
+  return rows.map((r) => {
+    const closingTime: Date | null = r.closes_at === null ? null : new Date(r.closes_at);
+    return {
+      id: r.id,
+      question: r.question,
+      totalVotes: r.total_votes,
+      closingTime,
+      closed: isClosed(closingTime, now),
+    };
+  });
+}
+
 export type CastVoteResult =
   | { status: "voted" }
   | { status: "poll-not-found" }
@@ -198,11 +229,10 @@ export type Results = {
   chosenOptionId?: string;
 };
 
-// Whether the viewer may see a Poll's Results, and the Results when they may. When several
-// reasons apply, the viewer's own Vote comes first, then the Poll being Closed, then being
-// its Creator.
+// Whether the viewer may see a Poll's Results, and the Results when they may. When both
+// reasons apply, the viewer's own Vote comes first.
 export type ResultsAccess =
-  | { status: "visible"; reason: "voted" | "closed" | "creator"; results: Results }
+  | { status: "visible"; reason: "voted" | "closed"; results: Results }
   | { status: "hidden" };
 
 export async function getResults(input: {
@@ -216,38 +246,66 @@ export async function getResults(input: {
       o.label,
       count(v.id)::int AS votes,
       coalesce(bool_or(v.voter_id = ${input.viewerId ?? null}), false) AS chosen,
-      coalesce(p.creator_id = ${input.viewerId ?? null}, false) AS viewer_is_creator,
       p.closes_at
     FROM options o
     JOIN polls p ON p.id = o.poll_id
     LEFT JOIN votes v ON v.option_id = o.id
     WHERE o.poll_id = ${input.pollId}
-    GROUP BY o.id, p.creator_id, p.closes_at
+    GROUP BY o.id, p.closes_at
     ORDER BY o.position
   `;
   if (rows.length === 0) return null;
 
   // While the Poll is open, Results stay hidden until the viewer votes, so other Votes can't
-  // sway theirs. The Creator can always see them. Once it is Closed, Votes can't change, so
-  // anyone can.
+  // sway theirs; that goes for the Poll's Creator too. Once it is Closed, Votes can't change,
+  // so anyone can see them. The Operator reads them with getPollResults instead.
   const chosen = rows.find((r) => r.chosen);
   const closingTime = rows[0].closes_at === null ? null : new Date(rows[0].closes_at);
   const closed = isClosed(closingTime, input.now ?? new Date());
-  if (!chosen && !closed && !rows[0].viewer_is_creator) return { status: "hidden" };
+  if (!chosen && !closed) return { status: "hidden" };
 
-  const totalVotes = rows.reduce((sum, r) => sum + r.votes, 0);
   return {
     status: "visible",
-    reason: chosen ? "voted" : closed ? "closed" : "creator",
-    results: {
-      totalVotes,
-      chosenOptionId: chosen ? String(chosen.id) : undefined,
-      options: rows.map((r) => ({
-        id: String(r.id),
-        label: r.label,
-        votes: r.votes,
-        percent: totalVotes === 0 ? 0 : Math.round((r.votes / totalVotes) * 100),
-      })),
-    },
+    reason: chosen ? "voted" : "closed",
+    results: toResults(rows as OptionTally[], chosen ? String(chosen.id) : undefined),
   };
+}
+
+// Vote counts per Option, in Option order, as the Results queries select them.
+type OptionTally = { id: string | number; label: string; votes: number };
+
+function toResults(rows: OptionTally[], chosenOptionId?: string): Results {
+  const totalVotes = rows.reduce((sum, r) => sum + r.votes, 0);
+  return {
+    totalVotes,
+    chosenOptionId,
+    options: rows.map((r) => ({
+      id: String(r.id),
+      label: r.label,
+      votes: r.votes,
+      percent: totalVotes === 0 ? 0 : Math.round((r.votes / totalVotes) * 100),
+    })),
+  };
+}
+
+// A Poll's current Results, whoever asks and whether or not it is Closed. It does no access
+// check: only call it for the Operator, after checking they are signed in. Read-only.
+export async function getPollResults(pollId: string): Promise<Results | null> {
+  const rows = await sql`
+    SELECT o.id, o.label, count(v.id)::int AS votes
+    FROM options o
+    LEFT JOIN votes v ON v.option_id = o.id
+    WHERE o.poll_id = ${pollId}
+    GROUP BY o.id
+    ORDER BY o.position
+  `;
+  if (rows.length === 0) return null;
+  return toResults(rows as OptionTally[]);
+}
+
+// Deletes the Poll with its Options and Votes (the foreign keys cascade). Returns whether a
+// Poll was deleted.
+export async function deletePoll(pollId: string): Promise<boolean> {
+  const deleted = await sql`DELETE FROM polls WHERE id = ${pollId} RETURNING id`;
+  return deleted.length > 0;
 }

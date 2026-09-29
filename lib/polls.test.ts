@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { castVote, createPoll, getPoll, getResults, PollValidationError } from "./polls";
+import {
+  castVote,
+  createPoll,
+  deletePoll,
+  getPoll,
+  getPollResults,
+  getResults,
+  listPolls,
+  PollValidationError,
+} from "./polls";
 
 const creatorId = () => `test-creator-${randomUUID()}`;
 const voterId = () => `test-voter-${randomUUID()}`;
@@ -17,6 +26,13 @@ async function pollWith(options: string[], timing: { closingTime?: string; now?:
   const poll = await getPoll(pollId, { now: timing.now });
   if (!poll) throw new Error("created Poll not found");
   return { ...poll, creatorId: creator };
+}
+
+// The current Results as the Operator reads them; fails the test if the Poll is missing.
+async function currentResults(pollId: string) {
+  const results = await getPollResults(pollId);
+  if (!results) throw new Error("Poll not found");
+  return results;
 }
 
 // The Results as the viewer sees them; fails the test if they are hidden or the Poll is missing.
@@ -133,7 +149,7 @@ describe("Vote and Results", () => {
     const [sea, mountain] = poll.options;
 
     await castVote({ pollId: poll.id, optionId: sea.id, voterId: voterId() });
-    const results = await resultsSeenBy(poll.id, poll.creatorId);
+    const results = await currentResults(poll.id);
 
     expect(results.totalVotes).toBe(1);
     expect(results.options).toEqual([
@@ -149,7 +165,7 @@ describe("Vote and Results", () => {
     for (const optionId of [sea.id, sea.id, mountain.id]) {
       await castVote({ pollId: poll.id, optionId, voterId: voterId() });
     }
-    const results = await resultsSeenBy(poll.id, poll.creatorId);
+    const results = await currentResults(poll.id);
 
     expect(results.totalVotes).toBe(3);
     expect(results.options.map((o) => [o.votes, o.percent])).toEqual([
@@ -162,7 +178,7 @@ describe("Vote and Results", () => {
   test("a Poll with no Votes shows every Option at 0%", async () => {
     const poll = await pollWith(["바다", "산"]);
 
-    const results = await resultsSeenBy(poll.id, poll.creatorId);
+    const results = await currentResults(poll.id);
 
     expect(results.totalVotes).toBe(0);
     expect(results.options.map((o) => [o.votes, o.percent])).toEqual([
@@ -181,13 +197,6 @@ describe("Vote and Results", () => {
     expect((await resultsSeenBy(poll.id, me)).chosenOptionId).toBe(mountain.id);
   });
 
-  test("Results show no choice to a Creator who hasn't voted", async () => {
-    const poll = await pollWith(["바다", "산"]);
-    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
-
-    expect((await resultsSeenBy(poll.id, poll.creatorId)).chosenOptionId).toBeUndefined();
-  });
-
   test("a Vote for an Option of another Poll is rejected and not counted", async () => {
     const poll = await pollWith(["바다", "산"]);
     const other = await pollWith(["짜장", "짬뽕"]);
@@ -199,8 +208,8 @@ describe("Vote and Results", () => {
     });
 
     expect(result.status).toBe("option-not-in-poll");
-    expect((await resultsSeenBy(poll.id, poll.creatorId)).totalVotes).toBe(0);
-    expect((await resultsSeenBy(other.id, other.creatorId)).totalVotes).toBe(0);
+    expect((await currentResults(poll.id)).totalVotes).toBe(0);
+    expect((await currentResults(other.id)).totalVotes).toBe(0);
   });
 
   test("a Vote on a Poll that doesn't exist reports the Poll as not found", async () => {
@@ -247,7 +256,7 @@ describe("One Vote per Voter", () => {
     ]);
 
     expect(statuses.map((r) => r.status).sort()).toEqual(["already-voted", "voted"]);
-    expect((await resultsSeenBy(poll.id, poll.creatorId)).totalVotes).toBe(1);
+    expect((await currentResults(poll.id)).totalVotes).toBe(1);
   });
 
   test("the same Voter can still vote on a different Poll", async () => {
@@ -276,11 +285,11 @@ describe("Who sees Results", () => {
     expect(await getResults({ pollId: poll.id })).toEqual({ status: "hidden" });
   });
 
-  test("the Creator sees the Results without voting", async () => {
+  test("the Creator can't see an open Poll's Results before voting either", async () => {
     const poll = await pollWith(["바다", "산"]);
     await castVote({ pollId: poll.id, optionId: poll.options[1].id, voterId: voterId() });
 
-    expect((await resultsSeenBy(poll.id, poll.creatorId)).options.map((o) => o.votes)).toEqual([0, 1]);
+    expect(await getResults({ pollId: poll.id, viewerId: poll.creatorId })).toEqual({ status: "hidden" });
   });
 
   test("the Creator can vote on their own Poll and sees their choice", async () => {
@@ -290,7 +299,7 @@ describe("Who sees Results", () => {
     const vote = await castVote({ pollId: poll.id, optionId: sea.id, voterId: poll.creatorId });
 
     expect(vote.status).toBe("voted");
-    expect((await resultsSeenBy(poll.id, poll.creatorId)).chosenOptionId).toBe(sea.id);
+    expect((await currentResults(poll.id)).chosenOptionId).toBe(sea.id);
   });
 
   test("a Voter sees the Results once they have voted", async () => {
@@ -300,14 +309,6 @@ describe("Who sees Results", () => {
     await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: me });
 
     expect((await getResults({ pollId: poll.id, viewerId: me }))?.status).toBe("visible");
-  });
-
-  test("Results say they are shown because the viewer is the Creator, until the Creator votes", async () => {
-    const poll = await pollWith(["바다", "산"]);
-
-    const access = await getResults({ pollId: poll.id, viewerId: poll.creatorId });
-
-    expect(access?.status === "visible" && access.reason).toBe("creator");
   });
 
   test("Results say they are shown because the viewer has voted", async () => {
@@ -400,7 +401,7 @@ describe("Voting after the Closing time", () => {
     });
 
     expect(result.status).toBe("closed");
-    expect((await resultsSeenBy(poll.id, poll.creatorId)).totalVotes).toBe(0);
+    expect((await currentResults(poll.id)).totalVotes).toBe(0);
   });
 
   test("a Voter who voted before the Poll closed is told it is Closed when voting again", async () => {
@@ -426,7 +427,7 @@ describe("Voting after the Closing time", () => {
     });
 
     expect(result.status).toBe("voted");
-    expect((await resultsSeenBy(poll.id, poll.creatorId)).options.map((o) => o.votes)).toEqual([0, 1]);
+    expect((await currentResults(poll.id)).options.map((o) => o.votes)).toEqual([0, 1]);
   });
 
   test("a Vote for an Option of another Poll on a Closed Poll is told it is Closed", async () => {
@@ -482,14 +483,111 @@ describe("Who sees Results after the Closing time", () => {
     expect(access?.status === "visible" && access.reason).toBe("closed");
   });
 
-  test("before the Closing time, Results are still hidden from someone who hasn't voted", async () => {
+  test("before the Closing time, Results are still hidden from anyone who hasn't voted", async () => {
     const poll = await closingPoll();
 
-    expect(await getResults({ pollId: poll.id, viewerId: voterId(), now: beforeClosing })).toEqual({
-      status: "hidden",
+    for (const viewerId of [voterId(), poll.creatorId]) {
+      expect(await getResults({ pollId: poll.id, viewerId, now: beforeClosing })).toEqual({
+        status: "hidden",
+      });
+    }
+  });
+});
+
+describe("Poll list", () => {
+  test("lists a Poll with its question, Vote count and whether it is Closed", async () => {
+    const poll = await pollWith(["바다", "산"], {
+      closingTime: "2026-10-03T18:00:00+09:00",
+      now: new Date("2026-10-01T12:00:00+09:00"),
     });
-    const creatorAccess = await getResults({ pollId: poll.id, viewerId: poll.creatorId, now: beforeClosing });
-    expect(creatorAccess?.status === "visible" && creatorAccess.reason).toBe("creator");
+    for (const optionId of [poll.options[0].id, poll.options[1].id, poll.options[1].id]) {
+      await castVote({ pollId: poll.id, optionId, voterId: voterId(), now: new Date("2026-10-02T12:00:00+09:00") });
+    }
+
+    const listed = (await listPolls({ now: new Date("2026-10-03T18:00:00+09:00") })).find(
+      (p) => p.id === poll.id,
+    );
+
+    expect(listed).toEqual({
+      id: poll.id,
+      question: "어디로 갈까요?",
+      totalVotes: 3,
+      closingTime: new Date("2026-10-03T09:00:00Z"),
+      closed: true,
+    });
+  });
+
+  test("lists newer Polls first", async () => {
+    const older = await pollWith(["바다", "산"]);
+    const newer = await pollWith(["바다", "산"]);
+
+    const ids = (await listPolls()).map((p) => p.id);
+
+    expect(ids.indexOf(newer.id)).toBeLessThan(ids.indexOf(older.id));
+  });
+});
+
+describe("Deleting a Poll", () => {
+  test("a deleted Poll, its Options and its Votes are gone", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
+
+    expect(await deletePoll(poll.id)).toBe(true);
+
+    expect(await getPoll(poll.id)).toBeNull();
+    expect(await getResults({ pollId: poll.id, viewerId: poll.creatorId })).toBeNull();
+    expect((await listPolls()).some((p) => p.id === poll.id)).toBe(false);
+    const vote = await castVote({ pollId: poll.id, optionId: poll.options[1].id, voterId: voterId() });
+    expect(vote.status).toBe("poll-not-found");
+  });
+
+  test("deleting a Poll leaves other Polls and their Votes alone", async () => {
+    const doomed = await pollWith(["바다", "산"]);
+    const kept = await pollWith(["짜장", "짬뽕"]);
+    await castVote({ pollId: kept.id, optionId: kept.options[1].id, voterId: voterId() });
+
+    await deletePoll(doomed.id);
+
+    expect((await currentResults(kept.id)).options.map((o) => o.votes)).toEqual([0, 1]);
+  });
+
+  test("deleting a Poll that doesn't exist reports nothing was deleted", async () => {
+    expect(await deletePoll("no-such-poll")).toBe(false);
+  });
+});
+
+describe("Results for the Operator", () => {
+  test("an open Poll's Results are available without voting, with no choice marked", async () => {
+    const poll = await pollWith(["바다", "산", "도시"]);
+    const [sea, mountain] = poll.options;
+    for (const optionId of [sea.id, mountain.id, mountain.id]) {
+      await castVote({ pollId: poll.id, optionId, voterId: voterId() });
+    }
+
+    expect(await getPollResults(poll.id)).toEqual({
+      totalVotes: 3,
+      options: [
+        { id: sea.id, label: "바다", votes: 1, percent: 33 },
+        { id: mountain.id, label: "산", votes: 2, percent: 67 },
+        { id: poll.options[2].id, label: "도시", votes: 0, percent: 0 },
+      ],
+      chosenOptionId: undefined,
+    });
+  });
+
+  test("reading the Results adds no Vote and leaves the Results hidden from others", async () => {
+    const poll = await pollWith(["바다", "산"]);
+    await castVote({ pollId: poll.id, optionId: poll.options[0].id, voterId: voterId() });
+
+    await getPollResults(poll.id);
+    await getPollResults(poll.id);
+
+    expect((await getPollResults(poll.id))?.totalVotes).toBe(1);
+    expect(await getResults({ pollId: poll.id, viewerId: voterId() })).toEqual({ status: "hidden" });
+  });
+
+  test("Results of a Poll that doesn't exist are nothing", async () => {
+    expect(await getPollResults("no-such-poll")).toBeNull();
   });
 });
 

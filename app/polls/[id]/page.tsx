@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPoll, getResults } from "@/lib/polls";
 import { readVisitorId } from "@/lib/visitor";
@@ -23,7 +24,10 @@ export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-12">
-      <h1 className="text-2xl font-semibold break-words">{poll.question}</h1>
+      <Link href="/" className="text-sm text-zinc-500 underline">
+        ← 투표 목록
+      </Link>
+      <h1 className="mt-4 text-2xl font-semibold break-words">{poll.question}</h1>
       <div className="mt-4">
         <CopyLinkButton pollId={poll.id} />
       </div>
@@ -46,16 +50,7 @@ export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
           {!hasVoted && <VoteForm pollId={poll.id} options={poll.options} />}
         </>
       )}
-      {access.status === "visible" && (
-        <>
-          {access.reason === "creator" && (
-            <p className="mt-10 text-sm text-zinc-600 dark:text-zinc-400">
-              내가 만든 투표라서 투표하기 전에도 결과를 볼 수 있어요.
-            </p>
-          )}
-          <ResultsView results={access.results} />
-        </>
-      )}
+      {access.status === "visible" && <ResultsView results={access.results} />}
     </main>
   );
 }
