@@ -8,7 +8,10 @@
 
    ```
    DATABASE_URL=postgres://...
+   OPERATOR_PASSWORD=...
    ```
+
+   `OPERATOR_PASSWORD`는 오른쪽 위 "운영자 로그인"(`/operator/login`)에서 입력하는 비밀번호예요. 비워 두면 아무도 운영자로 로그인할 수 없어요. 바꾸면 로그인해 있던 운영자는 모두 로그아웃돼요.
 
 2. 의존성을 설치하고 스키마를 만들어요. `db/migrations/`의 SQL 파일 중 아직 적용되지 않은 것만 순서대로 실행돼요.
 
