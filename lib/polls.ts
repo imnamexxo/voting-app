@@ -136,6 +136,7 @@ export async function getPoll(
 export type CastVoteResult =
   | { status: "voted" }
   | { status: "poll-not-found" }
+  | { status: "closed" }
   | { status: "option-not-in-poll" }
   | { status: "already-voted" };
 
@@ -143,15 +144,20 @@ export async function castVote(input: {
   pollId: string;
   optionId: string;
   voterId: string;
+  now?: Date;
 }): Promise<CastVoteResult> {
-  // Only inserts when the Option belongs to the Poll. Comparing as text means a malformed
-  // optionId from a tampered form simply matches nothing. The unique constraint turns a
-  // second Vote, even one racing the first, into a no-op instead of an error.
+  const now = (input.now ?? new Date()).toISOString();
+  // Only inserts when the Option belongs to the Poll and the Poll isn't Closed, checked in the
+  // same statement so the Closing time can't pass between the check and the save. Comparing
+  // as text means a malformed optionId from a tampered form simply matches nothing. The unique
+  // constraint turns a second Vote, even one racing the first, into a no-op instead of an error.
   const inserted = await sql`
     INSERT INTO votes (poll_id, option_id, voter_id)
     SELECT o.poll_id, o.id, ${input.voterId}
     FROM options o
+    JOIN polls p ON p.id = o.poll_id
     WHERE o.id::text = ${input.optionId} AND o.poll_id = ${input.pollId}
+      AND (p.closes_at IS NULL OR p.closes_at > ${now}::timestamptz)
     ON CONFLICT ON CONSTRAINT votes_one_per_voter DO NOTHING
     RETURNING id
   `;
@@ -160,6 +166,9 @@ export async function castVote(input: {
       SELECT
         EXISTS (SELECT 1 FROM polls WHERE id = ${input.pollId}) AS poll_exists,
         EXISTS (
+          SELECT 1 FROM polls WHERE id = ${input.pollId} AND closes_at <= ${now}::timestamptz
+        ) AS closed,
+        EXISTS (
           SELECT 1 FROM options WHERE id::text = ${input.optionId} AND poll_id = ${input.pollId}
         ) AS option_in_poll,
         EXISTS (
@@ -167,6 +176,7 @@ export async function castVote(input: {
         ) AS already_voted
     `;
     if (!why.poll_exists) return { status: "poll-not-found" };
+    if (why.closed) return { status: "closed" };
     if (!why.option_in_poll) return { status: "option-not-in-poll" };
     if (why.already_voted) return { status: "already-voted" };
     throw new Error("Vote was not saved for an unknown reason");

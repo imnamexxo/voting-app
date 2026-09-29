@@ -55,6 +55,7 @@ export async function castVoteAction(
   if (result.status === "option-not-in-poll") return { error: "이 투표에 없는 선택지예요. 다시 골라 주세요." };
 
   // "voted" and "already-voted" both end the same way: reload the Poll page, which shows the
-  // Results with the Voter's one counted Vote highlighted.
+  // Results with the Voter's one counted Vote highlighted. So does "closed": the page then says
+  // the Poll is Closed instead of showing the vote form.
   redirect(`/polls/${pollId}`);
 }

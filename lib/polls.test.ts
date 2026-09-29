@@ -381,3 +381,66 @@ describe("Closing time", () => {
     expect(poll.closingTime).toBeNull();
   });
 });
+
+describe("Voting after the Closing time", () => {
+  const closingTime = "2026-10-03T18:00:00+09:00";
+  const beforeClosing = new Date("2026-10-03T17:59:59.999+09:00");
+  const atClosing = new Date(closingTime);
+  const closingPoll = () =>
+    pollWith(["바다", "산"], { closingTime, now: new Date("2026-10-01T12:00:00+09:00") });
+
+  test("a Vote on a Closed Poll is refused and not counted", async () => {
+    const poll = await closingPoll();
+
+    const result = await castVote({
+      pollId: poll.id,
+      optionId: poll.options[0].id,
+      voterId: voterId(),
+      now: atClosing,
+    });
+
+    expect(result.status).toBe("closed");
+    expect((await resultsSeenBy(poll.id, poll.creatorId)).totalVotes).toBe(0);
+  });
+
+  test("a Voter who voted before the Poll closed is told it is Closed when voting again", async () => {
+    const poll = await closingPoll();
+    const [sea, mountain] = poll.options;
+    const me = voterId();
+
+    await castVote({ pollId: poll.id, optionId: sea.id, voterId: me, now: beforeClosing });
+    const again = await castVote({ pollId: poll.id, optionId: mountain.id, voterId: me, now: atClosing });
+
+    expect(again.status).toBe("closed");
+    expect((await resultsSeenBy(poll.id, me)).options.map((o) => o.votes)).toEqual([1, 0]);
+  });
+
+  test("a Vote just before the Closing time is counted", async () => {
+    const poll = await closingPoll();
+
+    const result = await castVote({
+      pollId: poll.id,
+      optionId: poll.options[1].id,
+      voterId: voterId(),
+      now: beforeClosing,
+    });
+
+    expect(result.status).toBe("voted");
+    expect((await resultsSeenBy(poll.id, poll.creatorId)).options.map((o) => o.votes)).toEqual([0, 1]);
+  });
+
+  test("a Vote for an Option of another Poll on a Closed Poll is told it is Closed", async () => {
+    const poll = await closingPoll();
+    const other = await pollWith(["짜장", "짬뽕"]);
+
+    const result = await castVote({
+      pollId: poll.id,
+      optionId: other.options[0].id,
+      voterId: voterId(),
+      now: atClosing,
+    });
+
+    expect(result.status).toBe("closed");
+  });
+});
+

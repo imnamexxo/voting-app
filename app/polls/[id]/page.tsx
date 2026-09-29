@@ -27,12 +27,25 @@ export default async function PollPage({ params }: PageProps<"/polls/[id]">) {
       <div className="mt-4">
         <CopyLinkButton pollId={poll.id} />
       </div>
-      {poll.closingTime && (
-        <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
-          {formatClosingTime(poll.closingTime)}까지 투표할 수 있어요
-        </p>
+      {poll.closed ? (
+        <div className="mt-8 rounded-md border border-zinc-300 px-4 py-3 dark:border-zinc-700">
+          <p className="font-medium">투표가 마감되었어요</p>
+          {poll.closingTime && (
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              {formatClosingTime(poll.closingTime)}에 마감되었어요.
+            </p>
+          )}
+        </div>
+      ) : (
+        <>
+          {poll.closingTime && (
+            <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
+              {formatClosingTime(poll.closingTime)}까지 투표할 수 있어요
+            </p>
+          )}
+          {!hasVoted && <VoteForm pollId={poll.id} options={poll.options} />}
+        </>
       )}
-      {!hasVoted && <VoteForm pollId={poll.id} options={poll.options} />}
       {access.status === "visible" && (
         <>
           {access.reason === "creator" && (
