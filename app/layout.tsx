@@ -23,7 +23,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        {/* The app's author, not a Poll's Creator. mt-auto keeps it at the bottom of short pages. */}
+        <footer className="mt-auto px-4 py-6 text-center text-sm text-zinc-500">제작: 유소영</footer>
+      </body>
     </html>
   );
 }
